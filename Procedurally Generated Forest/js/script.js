@@ -52,6 +52,130 @@ async function main() {
       }
     `;
 
+    // Function to choose an object based on probabilities
+    function chooseObject() {
+        const rand = Math.random();
+        let sum = 0;
+        for (let i = 0; i < probabilities.length; i++) {
+            sum += probabilities[i];
+            if (rand < sum) {
+                return i;
+            }
+        }
+        return probabilities.length - 1;
+    }
+
+    function degToRad(deg) {
+        return deg * Math.PI / 180;
+    }
+
+    function render(time = 0) {
+        time *= 0.001;  // convert to seconds
+
+        twgl.resizeCanvasToDisplaySize(gl.canvas);
+        gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
+        gl.enable(gl.DEPTH_TEST);
+
+        const fieldOfViewRadians = degToRad(60);
+        const aspect = gl.canvas.clientWidth / gl.canvas.clientHeight;
+        const projection = m4.perspective(fieldOfViewRadians, aspect, zNear, zFar);
+
+        const up = [0, 1, 0];
+        // Compute the camera's matrix using look at.
+        const cameraRadius = 3000; // Distance from the center
+        const cameraAngle = degToRad(360); // Angle in radians
+        const cameraX = cameraRadius * Math.sin(cameraAngle);
+        const cameraZ = cameraRadius * Math.cos(cameraAngle);
+        const cameraPosition = [cameraX, 1500, cameraZ]; // Position the camera above the scene
+
+        const cameraTarget = [0, 0, 0]; // Look at the center of the scene
+
+        const camera = m4.lookAt(cameraPosition, cameraTarget, up);
+        const view = m4.inverse(camera);
+
+        const u_reverseLightDirection = m4.normalize([0.5, 0.7, 1]);
+
+        const sharedUniforms = {
+            u_reverseLightDirection,
+            u_view: view,
+            u_projection: projection,
+            u_ambientLight: [0.1, 0.1, 0.1], // Ambient light
+        };
+
+        gl.useProgram(meshProgramInfo.program);
+
+        // calls gl.uniform
+        twgl.setUniforms(meshProgramInfo, sharedUniforms);
+
+        // Render each instance at its position
+        for (const linex of grid) {
+            for (columnz of linex) {
+                const objIndex = columnz.objIndex
+                const objPosition = columnz.position
+                const objRotation = columnz.rotation
+                const { obj, parts } = objects[objIndex];
+                const extents = getGeometriesExtents(obj.geometries);
+                const range = m4.subtractVectors(extents.max, extents.min);
+                // amount to move the object so its center is at the origin
+                var objOffset = m4.scaleVector(
+                    m4.addVectors(
+                        extents.min,
+                        m4.scaleVector(range, 0.5)),
+                    -1);
+                objOffset[1] = 0 // don't move on the y plane
+
+                // compute the world matrix once since all parts
+                // are at the same space.
+                let u_world = m4.yRotation(0);
+                u_world = m4.translate(u_world, ...objOffset);
+                u_world = m4.translate(u_world, ...objPosition); // Apply the random position
+                individual_rotation = m4.yRotation(objRotation);
+
+                u_world = m4.multiply(u_world, individual_rotation)
+                
+
+                const u_worldInverse = m4.inverse(u_world);
+                const u_worldInverseTranspose = m4.transpose(u_worldInverse);
+
+                for (const { bufferInfo, vao, material } of parts) {
+                    // set the attributes for this part.
+                    gl.bindVertexArray(vao);
+                    // calls gl.uniform
+                    twgl.setUniforms(meshProgramInfo, {
+                        u_world,
+                        u_worldInverseTranspose,
+                        u_diffuse: material.u_diffuse,
+                    });
+                    // calls gl.drawArrays or gl.drawElements
+                    twgl.drawBufferInfo(gl, bufferInfo);
+                }
+            }
+        }
+
+        requestAnimationFrame(render);
+    }
+
+    async function loadObjBufferVAO(filepath, colors) {
+        const response = await fetch(filepath);
+        const text = await response.text();
+        const obj = parseOBJ(text);
+
+        const parts = obj.geometries.map(({ data }, index) => {
+            const bufferInfo = twgl.createBufferInfoFromArrays(gl, data);
+            const vao = twgl.createVAOFromBufferInfo(gl, meshProgramInfo, bufferInfo);
+            return {
+                material: {
+                    u_diffuse: colors[index % colors.length],
+                },
+                bufferInfo,
+                vao,
+            };
+        });
+
+        return { obj, parts }; // Return the parts array containing VAOs
+    }
+
+
     // compiles and links the shaders, looks up attribute and uniform locations
     const meshProgramInfo = twgl.createProgramInfo(gl, [vs, fs]);
 
@@ -87,143 +211,36 @@ async function main() {
     }
 
     // Define probabilities for each object
-    var probabilities = [0.2, 0.4, 0.4]; // Tree, dead tree, stump
-    var numObjects = 100;
+    var probabilities = [0.6, 0.3, 0.1]; // Tree, dead tree, stump
 
-    // Function to choose an object based on probabilities
-    function chooseObject() {
-        const rand = Math.random();
-        let sum = 0;
-        for (let i = 0; i < probabilities.length; i++) {
-            sum += probabilities[i];
-            if (rand < sum) {
-                return i;
-            }
+    var grid = [];
+
+    var density = 1;
+    var baseDistance = 500;
+    var distance = baseDistance * density;
+    var maxDistance = 4000;
+    
+    var tempCounter = 0
+    for (var i = -maxDistance; i <= maxDistance; i += distance) {
+        grid.push([])
+        for (var j = -maxDistance; j <= maxDistance; j += distance) {
+            randomx = Math.random() * (distance / 1.5)
+            randomz = Math.random() * (distance / 1.5)
+            grid[tempCounter].push({
+                position: [i + randomx, 0, j + randomz],
+                rotation: Math.random() * Math.PI * 2,
+                objIndex: chooseObject()
+            });
         }
-        return probabilities.length - 1;
+        ++tempCounter
     }
-
-    // Generate random positions and choose objects
-    const instances = [];
-    for (let i = 0; i < numObjects; i++) {
-        const objIndex = chooseObject();
-        const x = (Math.random() - 0.5) * 5000;
-        const z = (Math.random() - 0.5) * 5000;
-        const rotation = Math.random() * Math.PI * 2;
-        instances.push({ objIndex, x, z, rotation });
-    }
-
-    function degToRad(deg) {
-        return deg * Math.PI / 180;
-    }
-
-    function render(time = 0) {
-        time *= 0.001;  // convert to seconds
-
-        twgl.resizeCanvasToDisplaySize(gl.canvas);
-        gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
-        gl.enable(gl.DEPTH_TEST);
-
-        const fieldOfViewRadians = degToRad(60);
-        const aspect = gl.canvas.clientWidth / gl.canvas.clientHeight;
-        const projection = m4.perspective(fieldOfViewRadians, aspect, zNear, zFar);
-
-        const up = [0, 1, 0];
-        // Compute the camera's matrix using look at.
-        const cameraRadius = 3000; // Distance from the center
-        const cameraAngle = degToRad(45); // Angle in radians
-        const cameraX = cameraRadius * Math.sin(cameraAngle);
-        const cameraZ = cameraRadius * Math.cos(cameraAngle);
-        const cameraPosition = [cameraX, 1500, cameraZ]; // Position the camera above the scene
-
-        const cameraTarget = [0, 0, 0]; // Look at the center of the scene
-
-        const camera = m4.lookAt(cameraPosition, cameraTarget, up);
-        const view = m4.inverse(camera);
-
-        const u_reverseLightDirection = m4.normalize([0.5, 0.7, 1]);
-
-        const sharedUniforms = {
-            u_reverseLightDirection,
-            u_view: view,
-            u_projection: projection,
-            u_ambientLight: [0.1, 0.1, 0.1], // Ambient light
-        };
-
-        gl.useProgram(meshProgramInfo.program);
-
-        // calls gl.uniform
-        twgl.setUniforms(meshProgramInfo, sharedUniforms);
-
-        // Render each instance at its position
-        for (const instance of instances) {
-            const { objIndex, x, z } = instance;
-            const { obj, parts } = objects[objIndex];
-            const extents = getGeometriesExtents(obj.geometries);
-            const range = m4.subtractVectors(extents.max, extents.min);
-            // amount to move the object so its center is at the origin
-            var objOffset = m4.scaleVector(
-                m4.addVectors(
-                    extents.min,
-                    m4.scaleVector(range, 0.5)),
-                -1);
-            objOffset[1] = 0 // don't move on the y plane
-
-            // compute the world matrix once since all parts
-            // are at the same space.
-            let u_world = m4.yRotation(time*0.25);
-            u_world = m4.translate(u_world, ...objOffset);
-            u_world = m4.translate(u_world, x, -400, z); // Apply the random position
-            individual_rotation = m4.yRotation(instance.rotation);
-
-            u_world = m4.multiply(u_world, individual_rotation)
-            
-
-            const u_worldInverse = m4.inverse(u_world);
-            const u_worldInverseTranspose = m4.transpose(u_worldInverse);
-
-            for (const { bufferInfo, vao, material } of parts) {
-                // set the attributes for this part.
-                gl.bindVertexArray(vao);
-                // calls gl.uniform
-                twgl.setUniforms(meshProgramInfo, {
-                    u_world,
-                    u_worldInverseTranspose,
-                    u_diffuse: material.u_diffuse,
-                });
-                // calls gl.drawArrays or gl.drawElements
-                twgl.drawBufferInfo(gl, bufferInfo);
-            }
-        }
-
-        requestAnimationFrame(render);
-    }
-
-    async function loadObjBufferVAO(filepath, colors) {
-        const response = await fetch(filepath);
-        const text = await response.text();
-        const obj = parseOBJ(text);
-
-        const parts = obj.geometries.map(({ data }, index) => {
-            const bufferInfo = twgl.createBufferInfoFromArrays(gl, data);
-            const vao = twgl.createVAOFromBufferInfo(gl, meshProgramInfo, bufferInfo);
-            return {
-                material: {
-                    u_diffuse: colors[index % colors.length],
-                },
-                bufferInfo,
-                vao,
-            };
-        });
-
-        return { obj, parts }; // Return the parts array containing VAOs
-    }
+    
 
     // Compute camera parameters based on the first object
     const extents = getGeometriesExtents(objects[0].obj.geometries);
     const range = m4.subtractVectors(extents.max, extents.min);
-    const zNear = range[2] * 0.1;
-    const zFar = range[2] * 10;
+    const zNear = 1; 
+    const zFar = 5000;
 
     render();
 }
