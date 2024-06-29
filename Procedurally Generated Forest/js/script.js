@@ -69,7 +69,7 @@ async function main() {
         return deg * Math.PI / 180;
     }
 
-    function render(time = 0) {
+    function render(time = 1) {
         time *= 0.001;  // convert to seconds
 
         twgl.resizeCanvasToDisplaySize(gl.canvas);
@@ -82,11 +82,11 @@ async function main() {
 
         const up = [0, 1, 0];
         // Compute the camera's matrix using look at.
-        const cameraRadius = 3000; // Distance from the center
+        const cameraRadius = 10000; // Distance from the center
         const cameraAngle = degToRad(360); // Angle in radians
         const cameraX = cameraRadius * Math.sin(cameraAngle);
         const cameraZ = cameraRadius * Math.cos(cameraAngle);
-        const cameraPosition = [cameraX, 1500, cameraZ]; // Position the camera above the scene
+        const cameraPosition = [cameraX, 8000, cameraZ]; // Position the camera above the scene
 
         const cameraTarget = [0, 0, 0]; // Look at the center of the scene
 
@@ -107,6 +107,23 @@ async function main() {
         // calls gl.uniform
         twgl.setUniforms(meshProgramInfo, sharedUniforms);
 
+        //drawing plane
+        gl.bindVertexArray(planeVao);
+
+        let u_world = m4.yRotation(time * 0.1);
+
+        let u_worldInverse = m4.inverse(u_world);
+        let u_worldInverseTranspose = m4.transpose(u_worldInverse); // for lighting
+
+
+        twgl.setUniforms(meshProgramInfo, {
+            u_world,
+            u_worldInverseTranspose,
+            u_diffuse:  [0.0, 0.5, 0.0, 1.0], // dark green
+        });
+
+        twgl.drawBufferInfo(gl, planeBufferInfo);
+
         // Render each instance at its position
         for (const linex of grid) {
             for (columnz of linex) {
@@ -126,7 +143,7 @@ async function main() {
 
                 // compute the world matrix once since all parts
                 // are at the same space.
-                let u_world = m4.yRotation(0);
+                u_world = m4.yRotation(time * 0.1);
                 u_world = m4.translate(u_world, ...objOffset);
                 u_world = m4.translate(u_world, ...objPosition); // Apply the random position
                 individual_rotation = m4.yRotation(objRotation);
@@ -134,8 +151,8 @@ async function main() {
                 u_world = m4.multiply(u_world, individual_rotation)
                 
 
-                const u_worldInverse = m4.inverse(u_world);
-                const u_worldInverseTranspose = m4.transpose(u_worldInverse);
+                u_worldInverse = m4.inverse(u_world);
+                u_worldInverseTranspose = m4.transpose(u_worldInverse);
 
                 for (const { bufferInfo, vao, material } of parts) {
                     // set the attributes for this part.
@@ -218,7 +235,7 @@ async function main() {
     var density = 1;
     var baseDistance = 500;
     var distance = baseDistance * density;
-    var maxDistance = 4000;
+    var maxDistance = 5000;
     
     var tempCounter = 0
     for (var i = -maxDistance; i <= maxDistance; i += distance) {
@@ -240,7 +257,13 @@ async function main() {
     const extents = getGeometriesExtents(objects[0].obj.geometries);
     const range = m4.subtractVectors(extents.max, extents.min);
     const zNear = 1; 
-    const zFar = 5000;
+    const zFar = 100000;
+
+
+    const planeSize = maxDistance * 2.2
+    const planeBufferInfo = twgl.primitives.createPlaneBufferInfo(gl, planeSize, planeSize)
+    const planeVao = twgl.createVAOFromBufferInfo(gl, meshProgramInfo, planeBufferInfo);
+
 
     render();
 }
