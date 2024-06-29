@@ -1,12 +1,76 @@
-@import url("https://webgl2fundamentals.org/webgl/resources/webgl-tutorials.css");
-html, body {
+body {
     margin: 0;
-    padding: 0;
     overflow: hidden;
-    height: 100%;
 }
+
 canvas {
     display: block;
     width: 100vw;
     height: 100vh;
+}
+
+#slider-container {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+}
+
+.slider-wrapper {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+}
+
+label {
+    margin-bottom: 5px;
+    font-size: 14px;
+    color: #333;
+}
+
+input[type="range"] {
+    appearance: none; /* Standard property */
+    -webkit-appearance: none; /* Chrome, Safari, and Opera */
+    -moz-appearance: none; /* Firefox */
+    width: 200px;
+    height: 10px;
+    background: #ddd;
+    outline: none;
+    opacity: 0.7;
+    transition: opacity .2s;
+}
+
+input[type="range"]:hover {
+    opacity: 1;
+}
+
+input[type="range"]::-webkit-slider-thumb {
+    appearance: none;
+    -webkit-appearance: none;
+    width: 20px;
+    height: 20px;
+    background: #4CAF50;
+    cursor: pointer;
+}
+
+input[type="range"]::-moz-range-thumb {
+    appearance: none;
+    width: 20px;
+    height: 20px;
+    background: #4CAF50;
+    cursor: pointer;
+}
+
+input[type="range"]::-ms-thumb {
+    appearance: none;
+    width: 20px;
+    height: 20px;
+    background: #4CAF50;
+    cursor: pointer;
+}
+
+#densitySlider {
+    direction: rtl; 
 }

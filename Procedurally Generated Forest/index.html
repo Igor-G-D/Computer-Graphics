@@ -1,18 +1,40 @@
 <!DOCTYPE html>
 <html lang="en">
-    <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <link rel="stylesheet" href="css/style.css">
-        <title>Document</title>
-    </head>
-    <body></body>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="css/style.css">
+    <title>Document</title>
+</head>
+<body>
+    <canvas id="canvas"></canvas>
+    
+    <div id="slider-container">
+        <div class="slider-wrapper">
+            <label for="forestSizeSlider">Forest Size</label>
+            <input type="range" id="forestSizeSlider" min="0.2" max="10" value="5" step="0.1">
+        </div>
+        <div class="slider-wrapper">
+            <label for="densitySlider">Forest Density</label>
+            <input type="range" id="densitySlider" min="0.6" max="6" value="2" step="0.1">
+        </div>
+        <div class="slider-wrapper">
+            <label for="treeSlider">Trees</label>
+            <input type="range" id="treeSlider" min="0" max="1" value="0.8" step = "0.01">
+        </div>
+        <div class="slider-wrapper">
+            <label for="deadTreeSlider">Dead Trees</label>
+            <input type="range" id="deadTreeSlider" min="0" max="1" value="0.8" step = "0.01">
+        </div>
+        <div class="slider-wrapper">
+            <label for="stumpSlider">Stumps</label>
+            <input type="range" id="stumpSlider" min="0" max="1" value="0.1" step = "0.01">
+        </div>
+    </div>
 
-        <canvas id="canvas"></canvas>
-
-        <script src="js/twgl-full.min.js"></script>
-        <script src="js/m4.js"></script>
-        <script src="js/objparser.js"></script>
-        <script src="js/script.js"></script>
-    </body>
+    <script src="js/twgl-full.min.js"></script>
+    <script src="js/m4.js"></script>
+    <script src="js/objparser.js"></script>
+    <script src="js/script.js"></script>
+</body>
 </html>

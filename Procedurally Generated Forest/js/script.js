@@ -86,7 +86,7 @@ async function main() {
         const cameraAngle = degToRad(360); // Angle in radians
         const cameraX = cameraRadius * Math.sin(cameraAngle);
         const cameraZ = cameraRadius * Math.cos(cameraAngle);
-        const cameraPosition = [cameraX, 8000, cameraZ]; // Position the camera above the scene
+        const cameraPosition = [cameraX, 3000, cameraZ]; // Position the camera above the scene
 
         const cameraTarget = [0, 0, 0]; // Look at the center of the scene
 
@@ -110,7 +110,7 @@ async function main() {
         //drawing plane
         gl.bindVertexArray(planeVao);
 
-        let u_world = m4.yRotation(time * 0.1);
+        let u_world = m4.yRotation(time * 0.05);
 
         let u_worldInverse = m4.inverse(u_world);
         let u_worldInverseTranspose = m4.transpose(u_worldInverse); // for lighting
@@ -143,7 +143,7 @@ async function main() {
 
                 // compute the world matrix once since all parts
                 // are at the same space.
-                u_world = m4.yRotation(time * 0.1);
+                u_world = m4.yRotation(time * 0.05);
                 u_world = m4.translate(u_world, ...objOffset);
                 u_world = m4.translate(u_world, ...objPosition); // Apply the random position
                 individual_rotation = m4.yRotation(objRotation);
@@ -192,7 +192,87 @@ async function main() {
         return { obj, parts }; // Return the parts array containing VAOs
     }
 
+    function calculateGrid(baseDistance, density, maxDistance) {
+        var grid = []
+        var distance = baseDistance * density;
+        var planeSize = (maxDistance + baseDistance) * 2.5
+        var tempCounter = 0
+        for (var i = -maxDistance; i <= maxDistance; i += distance) {
+            grid.push([])
+            for (var j = -maxDistance; j <= maxDistance; j += distance) {
+                randomx = Math.random() * (distance / 1.5)
+                randomz = Math.random() * (distance / 1.5)
+                grid[tempCounter].push({
+                    position: [i + randomx, 0, j + randomz],
+                    rotation: Math.random() * Math.PI * 2,
+                    objIndex: chooseObject()
+                });
+            }
+            ++tempCounter
+        }
 
+        return {
+            grid, planeSize
+        }
+    }
+
+    function getSliderValues() {
+        const densityValue = parseFloat(document.getElementById('densitySlider').value);
+        const treeValue = parseFloat(document.getElementById('treeSlider').value);
+        const deadTreeValue = parseFloat(document.getElementById('deadTreeSlider').value);
+        const stumpValue = parseFloat(document.getElementById('stumpSlider').value);
+        const forestSizeValue = parseFloat(document.getElementById('forestSizeSlider').value);
+        
+        return {
+            forestSizeSlider: forestSizeValue,
+            densitySlider: densityValue,
+            treeSlider: treeValue,
+            stumpSlider: stumpValue,
+            deadTreeSlider: deadTreeValue
+        }
+    }
+
+    function normalize(array) {
+        let sum = 0;
+        let normalized_array = []
+        array.forEach(element => {
+            sum += element;
+        });
+
+        array.forEach(element => {
+            normalized_array.push(element/sum)
+        });
+
+        return normalized_array
+    }
+    
+    function setParameters(sliderValues) {
+
+        var parameters = [sliderValues.treeSlider, sliderValues.deadTreeSlider, sliderValues.stumpSlider];
+        probabilities = normalize(parameters) // normalizes all values to add up to 1
+
+
+        const { grid: new_grid, planeSize: new_planeSize } = calculateGrid(
+            baseDistance = 500,
+            density = sliderValues.densitySlider,
+            maxDistance = sliderValues.forestSizeSlider * 2000
+        );
+
+        grid = new_grid
+        planeBufferInfo = twgl.primitives.createPlaneBufferInfo(gl, new_planeSize, new_planeSize)
+        planeVao = twgl.createVAOFromBufferInfo(gl, meshProgramInfo, planeBufferInfo);
+    }
+
+    // Slider changes
+    document.getElementById('slider-container').addEventListener('input', function(event) {
+        var sliderValues
+        if (event.target.type === 'range') {
+            sliderValues = getSliderValues();
+        }
+
+        setParameters(sliderValues)
+
+    });
     // compiles and links the shaders, looks up attribute and uniform locations
     const meshProgramInfo = twgl.createProgramInfo(gl, [vs, fs]);
 
@@ -227,42 +307,15 @@ async function main() {
         objects.push(objinfo); // Add parts to objects array
     }
 
-    // Define probabilities for each object
-    var probabilities = [0.6, 0.3, 0.1]; // Tree, dead tree, stump
+    // probabilities in order: Tree, dead tree, stump
+    var probabilities, planeBufferInfo, planeVao, grid
 
-    var grid = [];
-
-    var density = 1;
-    var baseDistance = 500;
-    var distance = baseDistance * density;
-    var maxDistance = 5000;
+    sliderValues = getSliderValues()
+    setParameters(sliderValues)
     
-    var tempCounter = 0
-    for (var i = -maxDistance; i <= maxDistance; i += distance) {
-        grid.push([])
-        for (var j = -maxDistance; j <= maxDistance; j += distance) {
-            randomx = Math.random() * (distance / 1.5)
-            randomz = Math.random() * (distance / 1.5)
-            grid[tempCounter].push({
-                position: [i + randomx, 0, j + randomz],
-                rotation: Math.random() * Math.PI * 2,
-                objIndex: chooseObject()
-            });
-        }
-        ++tempCounter
-    }
-    
-
-    // Compute camera parameters based on the first object
-    const extents = getGeometriesExtents(objects[0].obj.geometries);
-    const range = m4.subtractVectors(extents.max, extents.min);
+    // camera parameters
     const zNear = 1; 
-    const zFar = 100000;
-
-
-    const planeSize = maxDistance * 2.2
-    const planeBufferInfo = twgl.primitives.createPlaneBufferInfo(gl, planeSize, planeSize)
-    const planeVao = twgl.createVAOFromBufferInfo(gl, meshProgramInfo, planeBufferInfo);
+    const zFar = 1000000;
 
 
     render();
