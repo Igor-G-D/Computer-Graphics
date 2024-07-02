@@ -72,7 +72,7 @@ async function main() {
     function render(time = 1) {
         time *= 0.001;  // convert to seconds
 
-        gl.clearColor(0, 0, 0, 1); // gray background
+        gl.clearColor(0, 0, 0, 1); // black background
         gl.clear(gl.COLOR_BUFFER_BIT);
 
         twgl.resizeCanvasToDisplaySize(gl.canvas);
