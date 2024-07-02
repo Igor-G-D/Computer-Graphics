@@ -300,23 +300,23 @@ async function main() {
 
     const files = [
         [
-            '../Objects/Low_Poly_Forest_tree01.obj',
-            '../Objects/Low_Poly_Forest_tree02.obj',
-            '../Objects/Low_Poly_Forest_treeBlob01.obj',
-            '../Objects/Low_Poly_Forest_treeBlob02.obj'
+            'Computer-Graphics/Objects/Low_Poly_Forest_tree01.obj',
+            'Computer-Graphics/Objects/Low_Poly_Forest_tree02.obj',
+            'Computer-Graphics/Objects/Low_Poly_Forest_treeBlob01.obj',
+            'Computer-Graphics/Objects/Low_Poly_Forest_treeBlob02.obj'
         ], // tree
         [
-            '../Objects/Low_Poly_Forest_tree04.obj',
-            '../Objects/Low_Poly_Forest_tree05.obj',
-            '../Objects/Low_Poly_Forest_tree06.obj',
-            '../Objects/Low_Poly_Forest_tree07.obj',
-            '../Objects/Low_Poly_Forest_treeRoundTop04.obj',
-            '../Objects/Low_Poly_Forest_treeRoundTop06.obj' // dead tree  
+            'Computer-Graphics/Objects/Low_Poly_Forest_tree04.obj',
+            'Computer-Graphics/Objects/Low_Poly_Forest_tree05.obj',
+            'Computer-Graphics/Objects/Low_Poly_Forest_tree06.obj',
+            'Computer-Graphics/Objects/Low_Poly_Forest_tree07.obj',
+            'Computer-Graphics/Objects/Low_Poly_Forest_treeRoundTop04.obj',
+            'Computer-Graphics/Objects/Low_Poly_Forest_treeRoundTop06.obj' // dead tree  
         ], 
         [
-            '../Objects/Low_Poly_Forest_treeBlob04.obj',
-            '../Objects/Low_Poly_Forest_treeTall05.obj',
-            '../Objects/Low_Poly_Forest_treeTall06.obj'
+            'Computer-Graphics/Objects/Low_Poly_Forest_treeBlob04.obj',
+            'Computer-Graphics/Objects/Low_Poly_Forest_treeTall05.obj',
+            'Computer-Graphics/Objects/Low_Poly_Forest_treeTall06.obj'
         ], // tree stump
     ];
 
