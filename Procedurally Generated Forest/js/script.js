@@ -127,10 +127,11 @@ async function main() {
         // Render each instance at its position
         for (const linex of grid) {
             for (columnz of linex) {
+                const objTypeIndex = columnz.objTypeIndex
                 const objIndex = columnz.objIndex
                 const objPosition = columnz.position
                 const objRotation = columnz.rotation
-                const { obj, parts } = objects[objIndex];
+                const { obj, parts } = objects[objTypeIndex][objIndex];
                 const extents = getGeometriesExtents(obj.geometries);
                 const range = m4.subtractVectors(extents.max, extents.min);
                 // amount to move the object so its center is at the origin
@@ -197,15 +198,18 @@ async function main() {
         var distance = baseDistance * density;
         var planeSize = (maxDistance + baseDistance) * 2.5
         var tempCounter = 0
+        var objTypeIndex
         for (var i = -maxDistance; i <= maxDistance; i += distance) {
             grid.push([])
             for (var j = -maxDistance; j <= maxDistance; j += distance) {
+                objTypeIndex = chooseObject()
                 randomx = Math.random() * (distance / 1.5)
                 randomz = Math.random() * (distance / 1.5)
                 grid[tempCounter].push({
                     position: [i + randomx, 0, j + randomz],
                     rotation: Math.random() * Math.PI * 2,
-                    objIndex: chooseObject()
+                    objTypeIndex,
+                    objIndex: [Math.floor(Math.random() * objects[objTypeIndex].length)]
                 });
             }
             ++tempCounter
@@ -295,16 +299,37 @@ async function main() {
     ];
 
     const files = [
-        '/Objects/Low_Poly_Forest_tree01.obj', // tree
-        '/Objects/Low_Poly_Forest_tree06.obj', // dead tree
-        '/Objects/Low_Poly_Forest_treeBlob04.obj' // tree stump
+        [
+            '/Objects/Low_Poly_Forest_tree01.obj',
+            '/Objects/Low_Poly_Forest_tree02.obj',
+            '/Objects/Low_Poly_Forest_treeBlob01.obj',
+            '/Objects/Low_Poly_Forest_treeBlob02.obj'
+        ], // tree
+        [
+            '/Objects/Low_Poly_Forest_tree04.obj',
+            '/Objects/Low_Poly_Forest_tree05.obj',
+            '/Objects/Low_Poly_Forest_tree06.obj',
+            '/Objects/Low_Poly_Forest_tree07.obj',
+            '/Objects/Low_Poly_Forest_treeRoundTop04.obj',
+            '/Objects/Low_Poly_Forest_treeRoundTop06.obj' // dead tree  
+        ], 
+        [
+            '/Objects/Low_Poly_Forest_treeBlob04.obj',
+            '/Objects/Low_Poly_Forest_treeTall05.obj',
+            '/Objects/Low_Poly_Forest_treeTall06.obj'
+        ], // tree stump
     ];
 
     const objects = [];
-
+    
     for (let i = 0; i < files.length; i++) {
-        const objinfo = await loadObjBufferVAO(files[i], objColors[i]);
-        objects.push(objinfo); // Add parts to objects array
+        const group = [];
+        for (let j = 0; j < files[i].length; j++) {
+            const randomObjPath = files[i][j];
+            const objinfo = await loadObjBufferVAO(randomObjPath, objColors[i]);
+            group.push(objinfo); // Add parts to the group array
+        }
+        objects.push(group); // Add the group to the objects array
     }
 
     // probabilities in order: Tree, dead tree, stump
