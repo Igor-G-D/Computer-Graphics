@@ -1,83 +1,306 @@
 async function main() {
-    // Get A WebGL context
-    /** @type {HTMLCanvasElement} */
     const canvas = document.querySelector("#canvas");
     const gl = canvas.getContext("webgl2");
     if (!gl) {
         return;
     }
 
-    // Tell the twgl to match position with a_position etc..
     twgl.setAttributePrefix("a_");
 
-    const vs = `#version 300 es
-      in vec4 a_position;
-      in vec3 a_normal;
+    const vs = `
+    #version 300 es
+    in vec4 a_position;
+    in vec3 a_normal;
 
-      uniform mat4 u_projection;
-      uniform mat4 u_view;
-      uniform mat4 u_world;
-      uniform mat4 u_worldInverseTranspose;
+    uniform mat4 u_projection;
+    uniform mat4 u_view;
+    uniform mat4 u_world;
+    uniform mat4 u_worldInverseTranspose;
+    uniform mat4 u_lightWorldViewProjection; // New uniform
 
-      out vec3 v_normal;
+    out vec3 v_normal;
+    out vec4 v_shadowCoord; // New output
 
-      void main() {
-        gl_Position = u_projection * u_view * u_world * a_position;
-        v_normal = mat3(u_worldInverseTranspose) * a_normal;
-      }
+    void main() {
+    gl_Position = u_projection * u_view * u_world * a_position;
+    v_normal = mat3(u_worldInverseTranspose) * a_normal;
+    v_shadowCoord = u_lightWorldViewProjection * a_position; // Calculate shadow coordinates
+    }
     `;
+    const fs = `
+    #version 300 es
+    precision highp float;
 
-    const fs = `#version 300 es
-      precision highp float;
+    in vec3 v_normal;
+    in vec4 v_shadowCoord; // New input
 
-      in vec3 v_normal;
+    uniform vec4 u_diffuse;
+    uniform vec3 u_reverseLightDirection;
+    uniform vec3 u_ambientLight;
+    uniform sampler2D u_shadowMap; // New uniform
 
-      uniform vec4 u_diffuse;
-      uniform vec3 u_reverseLightDirection;
-      uniform vec3 u_ambientLight; // Add ambient light uniform
+    out vec4 outColor;
 
-      out vec4 outColor;
+    float getShadow(vec4 shadowCoord) {
+        vec3 projCoords = shadowCoord.xyz / shadowCoord.w;
+        projCoords = projCoords * 0.5 + 0.5;
+        float closestDepth = texture(u_shadowMap, projCoords.xy).r;
+        float currentDepth = projCoords.z;
+        return currentDepth > closestDepth + 0.005 ? 0.5 : 1.0; // Basic shadow comparison with bias
+    }
 
-      void main () {
+    void main () {
         vec3 normal = normalize(v_normal);
         vec3 lightDir = normalize(u_reverseLightDirection);
 
         // Diffuse lighting with a softening factor
-        float diffuse = max(dot(normal, lightDir), 0.0) * 0.3 + 0.3; // Softening factor applied here
+        float diffuse = max(dot(normal, lightDir), 0.0) * 0.3 + 0.5;
 
         // Combine ambient and diffuse lighting
         vec3 color = u_diffuse.rgb * (u_ambientLight + diffuse);
 
-        outColor = vec4(color, u_diffuse.a);
-      }
-    `;
+        // Calculate shadow
+        float shadow = getShadow(v_shadowCoord);
 
-    // Function to choose an object based on probabilities
-    function chooseObject() {
-        const rand = Math.random();
-        let sum = 0;
-        for (let i = 0; i < probabilities.length; i++) {
-            sum += probabilities[i];
-            if (rand < sum) {
-                return i;
-            }
-        }
-        return probabilities.length - 1;
+        outColor = vec4(color * shadow, u_diffuse.a);
+    }
+    `; // Your fragment shader code
+
+    const shadowVs = `
+    #version 300 es
+    in vec4 a_position;
+
+    uniform mat4 u_world;
+    uniform mat4 u_lightViewProjection;
+
+    void main() {
+    gl_Position = u_lightViewProjection * u_world * a_position;
     }
 
-    function degToRad(deg) {
-        return deg * Math.PI / 180;
+    `; // Shadow vertex shader code
+    const shadowFs = `
+    #version 300 es
+    precision highp float;
+
+    void main() {
+    // No output needed, depth is automatically written to the depth buffer
+    }
+    `; // Shadow fragment shader code
+
+    const meshProgramInfo = twgl.createProgramInfo(gl, [vs, fs]);
+    const shadowProgramInfo = twgl.createProgramInfo(gl, [shadowVs, shadowFs]);
+
+    // Create depth texture and framebuffer for shadow map
+    const depthTextureSize = 2048;
+    const depthTexture = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, depthTexture);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.DEPTH_COMPONENT16, depthTextureSize, depthTextureSize, 0, gl.DEPTH_COMPONENT, gl.UNSIGNED_SHORT, null);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+
+    const shadowFramebuffer = gl.createFramebuffer();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, shadowFramebuffer);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.TEXTURE_2D, depthTexture, 0);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+
+    const objects = await loadObjects();
+
+    function drawCameraScene(time, projection, view, programInfo, lightWorldViewProjection) {
+        // Same as your original drawing logic, but with added shadow logic
+        gl.useProgram(programInfo.program);
+        twgl.setUniforms(programInfo, {
+            u_view: view,
+            u_projection: projection,
+            u_reverseLightDirection: [0.5, 0.7, 1],
+            u_ambientLight: [0.1, 0.1, 0.1],
+            u_shadowMap: depthTexture, // Bind shadow map texture
+            u_lightWorldViewProjection: lightWorldViewProjection,
+        });
+
+        //drawing plane
+        gl.bindVertexArray(planeVao);
+
+        let u_world = m4.yRotation(time * 0.05);
+
+        let u_worldInverse = m4.inverse(u_world);
+        let u_worldInverseTranspose = m4.transpose(u_worldInverse); // for lighting
+
+
+        twgl.setUniforms(meshProgramInfo, {
+            u_world,
+            u_worldInverseTranspose,
+            u_diffuse:  [0.0, 0.5, 0.0, 1.0], // dark green
+        });
+
+        twgl.drawBufferInfo(gl, planeBufferInfo);
+    
+        // Render each instance at its position
+        for (const linex of grid) {
+            for (const columnz of linex) {
+                const objTypeIndex = columnz.objTypeIndex;
+                const objIndex = columnz.objIndex;
+                const objPosition = columnz.position;
+                const objRotation = columnz.rotation;
+                const { obj, parts } = objects[objTypeIndex][objIndex];
+                const extents = getGeometriesExtents(obj.geometries);
+                const range = m4.subtractVectors(extents.max, extents.min);
+
+                // Amount to move the object so its center is at the origin
+                var objOffset = m4.scaleVector(
+                    m4.addVectors(extents.min, m4.scaleVector(range, 1)),
+                    -1
+                );
+                objOffset[1] = 0; // don't move on the y plane
+
+                // Compute the world matrix once since all parts are at the same space.
+                u_world = m4.yRotation(time * 0.05);
+                u_world = m4.translate(u_world, ...objOffset);
+                u_world = m4.translate(u_world, ...objPosition); // Apply the random position
+                individual_rotation = m4.yRotation(objRotation);
+
+                u_world = m4.multiply(u_world, individual_rotation);
+
+                u_worldInverse = m4.inverse(u_world);
+                u_worldInverseTranspose = m4.transpose(u_worldInverse);
+
+                for (const { bufferInfo, vao, material } of parts) {
+                    // Set the attributes for this part.
+                    gl.bindVertexArray(vao);
+                    // Calls gl.uniform
+                    twgl.setUniforms(programInfo, {
+                        u_world,
+                        u_worldInverseTranspose,
+                        u_diffuse: material.u_diffuse,
+                    });
+                    // Calls gl.drawArrays or gl.drawElements
+                    twgl.drawBufferInfo(gl, bufferInfo);
+                }
+            }
+        }
+    }
+
+    function drawShadowScene(time, lightViewProjection, shadowProgramInfo) {
+        gl.useProgram(shadowProgramInfo.program);
+        twgl.setUniforms(shadowProgramInfo, {
+            u_lightViewProjection: lightViewProjection,
+        });
+
+        gl.bindFramebuffer(gl.FRAMEBUFFER, shadowFramebuffer);
+        gl.viewport(0, 0, depthTextureSize, depthTextureSize);
+        gl.clear(gl.DEPTH_BUFFER_BIT);
+        // Make sure planeBufferInfo includes valid element array buffer if needed
+        gl.bindVertexArray(planeVao);
+        twgl.drawBufferInfo(gl, planeBufferInfo);
+        gl.bindVertexArray(null);
+
+        // Render each instance at its position
+        for (const linex of grid) {
+            for (const columnz of linex) {
+                const objTypeIndex = columnz.objTypeIndex;
+                const objIndex = columnz.objIndex;
+                const objPosition = columnz.position;
+                const objRotation = columnz.rotation;
+                const { obj, parts } = objects[objTypeIndex][objIndex];
+                const extents = getGeometriesExtents(obj.geometries);
+                const range = m4.subtractVectors(extents.max, extents.min);
+
+                // Amount to move the object so its center is at the origin
+                var objOffset = m4.scaleVector(
+                    m4.addVectors(extents.min, m4.scaleVector(range, 1)),
+                    -1
+                );
+                objOffset[1] = 0; // don't move on the y plane
+
+                // Compute the world matrix once since all parts are at the same space.
+                u_world = m4.yRotation(time * 0.05);
+                u_world = m4.translate(u_world, ...objOffset);
+                u_world = m4.translate(u_world, ...objPosition); // Apply the random position
+                individual_rotation = m4.yRotation(objRotation);
+
+                u_world = m4.multiply(u_world, individual_rotation);
+
+                u_worldInverse = m4.inverse(u_world);
+                u_worldInverseTranspose = m4.transpose(u_worldInverse);
+
+                for (const { bufferInfo, vao, material } of parts) {
+                    // Set the attributes for this part.
+                    gl.bindVertexArray(vao);
+                    // Calls gl.uniform
+                    twgl.setUniforms(shadowProgramInfo, {
+                        u_world,
+                        u_worldInverseTranspose,
+                        u_diffuse: material.u_diffuse,
+                    });
+                    // Calls gl.drawArrays or gl.drawElements
+                    twgl.drawBufferInfo(gl, bufferInfo);
+                }
+            }
+        }
+        gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    }
+
+    async function loadObjects() {
+        const objColors = [
+            [ // Tree colors
+                [0.0, 1.0, 0.0, 1.0], // Green
+                [0.0, 1.0, 0.0, 1.0], // Green
+                [0.0, 1.0, 0.0, 1.0], // Green
+                [0.0, 1.0, 0.0, 1.0], // Green
+                [0.6, 0.3, 0.0, 1.0] // Brown
+            ],
+            [ // Dead tree colors
+                [0.6, 0.3, 0.0, 1.0] // Brown
+            ],
+            [ // Stump colors
+                [0.6, 0.3, 0.0, 1.0] // Brown
+            ]
+        ];
+        const files = [
+            [
+                '/Objects/Low_Poly_Forest_tree01.obj',
+                '/Objects/Low_Poly_Forest_tree02.obj',
+                '/Objects/Low_Poly_Forest_treeBlob01.obj',
+                '/Objects/Low_Poly_Forest_treeBlob02.obj'
+            ], // tree
+            [
+                '/Objects/Low_Poly_Forest_tree04.obj',
+                '/Objects/Low_Poly_Forest_tree05.obj',
+                '/Objects/Low_Poly_Forest_tree06.obj',
+                '/Objects/Low_Poly_Forest_tree07.obj',
+                '/Objects/Low_Poly_Forest_treeRoundTop04.obj',
+                '/Objects/Low_Poly_Forest_treeRoundTop06.obj' // dead tree  
+            ], 
+            [
+                '/Objects/Low_Poly_Forest_treeBlob04.obj',
+                '/Objects/Low_Poly_Forest_treeTall05.obj',
+                '/Objects/Low_Poly_Forest_treeTall06.obj'
+            ], // tree stump
+        ];
+    
+        var objects = [];
+    
+        for (let i = 0; i < files.length; i++) {
+            const group = [];
+            for (let j = 0; j < files[i].length; j++) {
+                const randomObjPath = files[i][j];
+                const objinfo = await loadObjBufferVAO(randomObjPath, objColors[i]);
+                group.push(objinfo); // Add parts to the group array
+            }
+            objects.push(group); // Add the group to the objects array
+        }
+
+        return objects
     }
 
     function render(time = 1) {
-        time *= 0.001;  // convert to seconds
+        time *= 0.001;
+        gl.enable(gl.DEPTH_TEST);
 
-        gl.clearColor(0, 0, 0, 1); // black background
-        gl.clear(gl.COLOR_BUFFER_BIT);
+        gl.clearColor(0, 0, 0, 1);
+        gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 
         twgl.resizeCanvasToDisplaySize(gl.canvas);
         gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
-        gl.enable(gl.DEPTH_TEST);
 
         const fieldOfViewRadians = degToRad(60);
         const aspect = gl.canvas.clientWidth / gl.canvas.clientHeight;
@@ -96,82 +319,13 @@ async function main() {
         const camera = m4.lookAt(cameraPosition, cameraTarget, up);
         const view = m4.inverse(camera);
 
-        const u_reverseLightDirection = m4.normalize([0.5, 0.7, 1]);
+        const lightPosition = [3000, 3000, 3000];
+        const lightTarget = [0, 0, 0];
+        const lightViewMatrix = m4.lookAt(lightPosition, lightTarget, [0, 1, 0]);
+        const lightViewProjection = m4.multiply(m4.orthographic(-5000, 5000, -5000, 5000, 1, 10000), m4.inverse(lightViewMatrix));
 
-        const sharedUniforms = {
-            u_reverseLightDirection,
-            u_view: view,
-            u_projection: projection,
-            u_ambientLight: [0.1, 0.1, 0.1], // Ambient light
-        };
-
-        gl.useProgram(meshProgramInfo.program);
-
-        // calls gl.uniform
-        twgl.setUniforms(meshProgramInfo, sharedUniforms);
-
-        //drawing plane
-        gl.bindVertexArray(planeVao);
-
-        let u_world = m4.yRotation(time * 0.05);
-
-        let u_worldInverse = m4.inverse(u_world);
-        let u_worldInverseTranspose = m4.transpose(u_worldInverse); // for lighting
-
-
-        twgl.setUniforms(meshProgramInfo, {
-            u_world,
-            u_worldInverseTranspose,
-            u_diffuse:  [0.0, 0.5, 0.0, 1.0], // dark green
-        });
-
-        twgl.drawBufferInfo(gl, planeBufferInfo);
-
-        // Render each instance at its position
-        for (const linex of grid) {
-            for (columnz of linex) {
-                const objTypeIndex = columnz.objTypeIndex
-                const objIndex = columnz.objIndex
-                const objPosition = columnz.position
-                const objRotation = columnz.rotation
-                const { obj, parts } = objects[objTypeIndex][objIndex];
-                const extents = getGeometriesExtents(obj.geometries);
-                const range = m4.subtractVectors(extents.max, extents.min);
-                // amount to move the object so its center is at the origin
-                var objOffset = m4.scaleVector(
-                    m4.addVectors(
-                        extents.min,
-                        m4.scaleVector(range, 0.5)),
-                    -1);
-                objOffset[1] = 0 // don't move on the y plane
-
-                // compute the world matrix once since all parts
-                // are at the same space.
-                u_world = m4.yRotation(time * 0.05);
-                u_world = m4.translate(u_world, ...objOffset);
-                u_world = m4.translate(u_world, ...objPosition); // Apply the random position
-                individual_rotation = m4.yRotation(objRotation);
-
-                u_world = m4.multiply(u_world, individual_rotation)
-                
-
-                u_worldInverse = m4.inverse(u_world);
-                u_worldInverseTranspose = m4.transpose(u_worldInverse);
-
-                for (const { bufferInfo, vao, material } of parts) {
-                    // set the attributes for this part.
-                    gl.bindVertexArray(vao);
-                    // calls gl.uniform
-                    twgl.setUniforms(meshProgramInfo, {
-                        u_world,
-                        u_worldInverseTranspose,
-                        u_diffuse: material.u_diffuse,
-                    });
-                    // calls gl.drawArrays or gl.drawElements
-                    twgl.drawBufferInfo(gl, bufferInfo);
-                }
-            }
-        }
+        //drawShadowScene(time, lightViewProjection, shadowProgramInfo); // Render shadow map
+        drawCameraScene(time, projection, view, meshProgramInfo, lightViewProjection); // Render the scene
 
         requestAnimationFrame(render);
     }
@@ -197,17 +351,17 @@ async function main() {
     }
 
     function calculateGrid(baseDistance, density, maxDistance) {
-        var grid = []
+        var grid = [];
         var distance = baseDistance * density;
-        var planeSize = (maxDistance + baseDistance) * 2.5
-        var tempCounter = 0
-        var objTypeIndex
+        var planeSize = (maxDistance + baseDistance) * 2.5;
+        var tempCounter = 0;
+        var objTypeIndex;
         for (var i = -maxDistance; i <= maxDistance; i += distance) {
-            grid.push([])
+            grid.push([]);
             for (var j = -maxDistance; j <= maxDistance; j += distance) {
-                objTypeIndex = chooseObject()
-                randomx = Math.random() * (distance / 1.5)
-                randomz = Math.random() * (distance / 1.5)
+                objTypeIndex = chooseObject();
+                randomx = Math.random() * (distance / 1.5);
+                randomz = Math.random() * (distance / 1.5);
                 grid[tempCounter].push({
                     position: [i + randomx, 0, j + randomz],
                     rotation: Math.random() * Math.PI * 2,
@@ -215,12 +369,12 @@ async function main() {
                     objIndex: [Math.floor(Math.random() * objects[objTypeIndex].length)]
                 });
             }
-            ++tempCounter
+            ++tempCounter;
         }
 
         return {
             grid, planeSize
-        }
+        };
     }
 
     function getSliderValues() {
@@ -236,28 +390,42 @@ async function main() {
             treeSlider: treeValue,
             stumpSlider: stumpValue,
             deadTreeSlider: deadTreeValue
+        };
+    }
+    // Function to choose an object based on probabilities
+    function chooseObject() {
+        const rand = Math.random();
+        let sum = 0;
+        for (let i = 0; i < probabilities.length; i++) {
+            sum += probabilities[i];
+            if (rand < sum) {
+                return i;
+            }
         }
+        return probabilities.length - 1;
+    }
+
+    function degToRad(deg) {
+        return deg * Math.PI / 180;
     }
 
     function normalize(array) {
         let sum = 0;
-        let normalized_array = []
+        let normalized_array = [];
         array.forEach(element => {
             sum += element;
         });
 
         array.forEach(element => {
-            normalized_array.push(element/sum)
+            normalized_array.push(element / sum);
         });
 
-        return normalized_array
+        return normalized_array;
     }
-    
+
     function setParameters(sliderValues) {
-
         var parameters = [sliderValues.treeSlider, sliderValues.deadTreeSlider, sliderValues.stumpSlider];
-        probabilities = normalize(parameters) // normalizes all values to add up to 1
-
+        probabilities = normalize(parameters); // Normalizes all values to add up to 1
 
         const { grid: new_grid, planeSize: new_planeSize } = calculateGrid(
             baseDistance = 500,
@@ -265,88 +433,32 @@ async function main() {
             maxDistance = sliderValues.forestSizeSlider * 2000
         );
 
-        grid = new_grid
-        planeBufferInfo = twgl.primitives.createPlaneBufferInfo(gl, new_planeSize, new_planeSize)
+        grid = new_grid;
+        planeBufferInfo = twgl.primitives.createPlaneBufferInfo(gl, new_planeSize, new_planeSize);
         planeVao = twgl.createVAOFromBufferInfo(gl, meshProgramInfo, planeBufferInfo);
     }
 
     // Slider changes
     document.getElementById('slider-container').addEventListener('input', function(event) {
-        var sliderValues
+        var sliderValues;
         if (event.target.type === 'range') {
             sliderValues = getSliderValues();
         }
 
-        setParameters(sliderValues)
-
+        setParameters(sliderValues);
     });
-    // compiles and links the shaders, looks up attribute and uniform locations
-    const meshProgramInfo = twgl.createProgramInfo(gl, [vs, fs]);
 
-    // loading all the different assets
+    // Probabilities in order: Tree, dead tree, stump
+    var probabilities, planeBufferInfo, planeVao, grid;
 
-    const objColors = [
-        [ // Tree colors
-            [0.0, 1.0, 0.0, 1.0], // Green
-            [0.0, 1.0, 0.0, 1.0], // Green
-            [0.0, 1.0, 0.0, 1.0], // Green
-            [0.0, 1.0, 0.0, 1.0], // Green
-            [0.6, 0.3, 0.0, 1.0] // Brown
-        ],
-        [ // Dead tree colors
-            [0.6, 0.3, 0.0, 1.0] // Brown
-        ],
-        [ // Stump colors
-            [0.6, 0.3, 0.0, 1.0] // Brown
-        ]
-    ];
-
-    const files = [
-        [
-            '/Computer-Graphics/Objects/Low_Poly_Forest_tree01.obj',
-            '/Computer-Graphics/Objects/Low_Poly_Forest_tree02.obj',
-            '/Computer-Graphics/Objects/Low_Poly_Forest_treeBlob01.obj',
-            '/Computer-Graphics/Objects/Low_Poly_Forest_treeBlob02.obj'
-        ], // tree
-        [
-            '/Computer-Graphics/Objects/Low_Poly_Forest_tree04.obj',
-            '/Computer-Graphics/Objects/Low_Poly_Forest_tree05.obj',
-            '/Computer-Graphics/Objects/Low_Poly_Forest_tree06.obj',
-            '/Computer-Graphics/Objects/Low_Poly_Forest_tree07.obj',
-            '/Computer-Graphics/Objects/Low_Poly_Forest_treeRoundTop04.obj',
-            '/Computer-Graphics/Objects/Low_Poly_Forest_treeRoundTop06.obj' // dead tree  
-        ], 
-        [
-            '/Computer-Graphics/Objects/Low_Poly_Forest_treeBlob04.obj',
-            '/Computer-Graphics/Objects/Low_Poly_Forest_treeTall05.obj',
-            '/Computer-Graphics/Objects/Low_Poly_Forest_treeTall06.obj'
-        ], // tree stump
-    ];
-
-    const objects = [];
+    sliderValues = getSliderValues();
+    setParameters(sliderValues);
     
-    for (let i = 0; i < files.length; i++) {
-        const group = [];
-        for (let j = 0; j < files[i].length; j++) {
-            const randomObjPath = files[i][j];
-            const objinfo = await loadObjBufferVAO(randomObjPath, objColors[i]);
-            group.push(objinfo); // Add parts to the group array
-        }
-        objects.push(group); // Add the group to the objects array
-    }
-
-    // probabilities in order: Tree, dead tree, stump
-    var probabilities, planeBufferInfo, planeVao, grid
-
-    sliderValues = getSliderValues()
-    setParameters(sliderValues)
-    
-    // camera parameters
+    // Camera parameters
     const zNear = 1; 
     const zFar = 1000000;
-
-
-    render();
+    
+    render()
 }
 
 main();
