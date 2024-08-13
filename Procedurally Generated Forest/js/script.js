@@ -16,15 +16,15 @@ async function main() {
     uniform mat4 u_view;
     uniform mat4 u_world;
     uniform mat4 u_worldInverseTranspose;
-    uniform mat4 u_lightWorldViewProjection; // New uniform
+    uniform mat4 u_lightWorldViewProjection;
 
     out vec3 v_normal;
-    out vec4 v_shadowCoord; // New output
+    out vec4 v_shadowCoord;
 
     void main() {
     gl_Position = u_projection * u_view * u_world * a_position;
     v_normal = mat3(u_worldInverseTranspose) * a_normal;
-    v_shadowCoord = u_lightWorldViewProjection * a_position; // Calculate shadow coordinates
+    v_shadowCoord = u_lightWorldViewProjection * a_position;
     }
     `;
     const fs = `
@@ -32,12 +32,12 @@ async function main() {
     precision highp float;
 
     in vec3 v_normal;
-    in vec4 v_shadowCoord; // New input
+    in vec4 v_shadowCoord;
 
     uniform vec4 u_diffuse;
     uniform vec3 u_reverseLightDirection;
     uniform vec3 u_ambientLight;
-    uniform sampler2D u_shadowMap; // New uniform
+    uniform sampler2D u_shadowMap; 
 
     out vec4 outColor;
 
@@ -45,8 +45,18 @@ async function main() {
         vec3 projCoords = shadowCoord.xyz / shadowCoord.w;
         projCoords = projCoords * 0.5 + 0.5;
         float closestDepth = texture(u_shadowMap, projCoords.xy).r;
-        float currentDepth = projCoords.z;
-        return currentDepth > closestDepth + 0.005 ? 0.5 : 1.0; // Basic shadow comparison with bias
+        float currentDepth = projCoords.z - 0.005;
+        float shadow = 0.0;
+        vec2 texelSize = 1.0 / vec2(textureSize(u_shadowMap, 0));
+        
+        for (int x = -1; x <= 1; x++) {
+            for (int y = -1; y <= 1; y++) {
+                float pcfDepth = texture(u_shadowMap, projCoords.xy + vec2(x, y) * texelSize).r; 
+                shadow += currentDepth > pcfDepth ? 0.5 : 1.0;
+            }
+        }
+        shadow /= 9.0;
+        return shadow;
     }
 
     void main () {
@@ -64,7 +74,7 @@ async function main() {
 
         outColor = vec4(color * shadow, u_diffuse.a);
     }
-    `; // Your fragment shader code
+    `;
 
     const shadowVs = `
     #version 300 es
@@ -77,7 +87,7 @@ async function main() {
     gl_Position = u_lightViewProjection * u_world * a_position;
     }
 
-    `; // Shadow vertex shader code
+    `; 
     const shadowFs = `
     #version 300 es
     precision highp float;
@@ -85,13 +95,13 @@ async function main() {
     void main() {
     // No output needed, depth is automatically written to the depth buffer
     }
-    `; // Shadow fragment shader code
+    `; 
 
     const meshProgramInfo = twgl.createProgramInfo(gl, [vs, fs]);
     const shadowProgramInfo = twgl.createProgramInfo(gl, [shadowVs, shadowFs]);
 
     // Create depth texture and framebuffer for shadow map
-    const depthTextureSize = 2048;
+    const depthTextureSize = 4096;
     const depthTexture = gl.createTexture();
     gl.bindTexture(gl.TEXTURE_2D, depthTexture);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.DEPTH_COMPONENT16, depthTextureSize, depthTextureSize, 0, gl.DEPTH_COMPONENT, gl.UNSIGNED_SHORT, null);
@@ -106,7 +116,7 @@ async function main() {
     const objects = await loadObjects();
 
     function drawCameraScene(time, projection, view, programInfo, lightWorldViewProjection) {
-        // Same as your original drawing logic, but with added shadow logic
+        gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
         gl.useProgram(programInfo.program);
         twgl.setUniforms(programInfo, {
             u_view: view,
@@ -180,18 +190,25 @@ async function main() {
     }
 
     function drawShadowScene(time, lightViewProjection, shadowProgramInfo) {
-        gl.useProgram(shadowProgramInfo.program);
-        twgl.setUniforms(shadowProgramInfo, {
-            u_lightViewProjection: lightViewProjection,
-        });
-
         gl.bindFramebuffer(gl.FRAMEBUFFER, shadowFramebuffer);
         gl.viewport(0, 0, depthTextureSize, depthTextureSize);
         gl.clear(gl.DEPTH_BUFFER_BIT);
-        // Make sure planeBufferInfo includes valid element array buffer if needed
+        
+        // Render shadow scene
+        gl.useProgram(shadowProgramInfo.program);
+
+        //drawing plane
         gl.bindVertexArray(planeVao);
+
+        let u_world = m4.yRotation(time * 0.05);
+
+        twgl.setUniforms(shadowProgramInfo, {
+            u_world,
+            u_lightViewProjection: lightViewProjection
+        });
+
         twgl.drawBufferInfo(gl, planeBufferInfo);
-        gl.bindVertexArray(null);
+    
 
         // Render each instance at its position
         for (const linex of grid) {
@@ -212,7 +229,7 @@ async function main() {
                 objOffset[1] = 0; // don't move on the y plane
 
                 // Compute the world matrix once since all parts are at the same space.
-                u_world = m4.yRotation(time * 0.05);
+                u_world = m4.yRotation(0);
                 u_world = m4.translate(u_world, ...objOffset);
                 u_world = m4.translate(u_world, ...objPosition); // Apply the random position
                 individual_rotation = m4.yRotation(objRotation);
@@ -228,8 +245,7 @@ async function main() {
                     // Calls gl.uniform
                     twgl.setUniforms(shadowProgramInfo, {
                         u_world,
-                        u_worldInverseTranspose,
-                        u_diffuse: material.u_diffuse,
+                        u_lightViewProjection: lightViewProjection
                     });
                     // Calls gl.drawArrays or gl.drawElements
                     twgl.drawBufferInfo(gl, bufferInfo);
@@ -319,12 +335,11 @@ async function main() {
         const camera = m4.lookAt(cameraPosition, cameraTarget, up);
         const view = m4.inverse(camera);
 
-        const lightPosition = [3000, 3000, 3000];
+        const lightPosition = [15000, 30000, 15000];
         const lightTarget = [0, 0, 0];
         const lightViewMatrix = m4.lookAt(lightPosition, lightTarget, [0, 1, 0]);
-        const lightViewProjection = m4.multiply(m4.orthographic(-5000, 5000, -5000, 5000, 1, 10000), m4.inverse(lightViewMatrix));
-
-        //drawShadowScene(time, lightViewProjection, shadowProgramInfo); // Render shadow map
+        const lightViewProjection = m4.multiply(m4.orthographic(-10000, 10000, -10000, 10000, 1, 100000), m4.inverse(lightViewMatrix));
+        drawShadowScene(time, lightViewProjection, shadowProgramInfo); // Render shadow map
         drawCameraScene(time, projection, view, meshProgramInfo, lightViewProjection); // Render the scene
 
         requestAnimationFrame(render);
