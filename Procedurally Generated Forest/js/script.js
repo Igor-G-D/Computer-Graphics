@@ -1,5 +1,6 @@
 async function main() {
     const rng = new RNG(2)
+    const useCube = false
     const canvas = document.querySelector("#canvas");
     const gl = canvas.getContext("webgl2");
     if (!gl) {
@@ -16,16 +17,23 @@ async function main() {
     uniform mat4 u_projection;
     uniform mat4 u_view;
     uniform mat4 u_world;
-    uniform mat4 u_worldInverseTranspose;
     uniform mat4 u_lightWorldViewProjection;
 
     out vec3 v_normal;
     out vec4 v_shadowCoord;
 
-    void main() {
-    gl_Position = u_projection * u_view * u_world * a_position;
-    v_normal = mat3(u_worldInverseTranspose) * a_normal;
-    v_shadowCoord = u_lightWorldViewProjection * a_position;
+    void main() {   
+        // Apply world transformation to the vertex
+        vec4 worldPosition = u_world * a_position;
+        
+        // Calculate the final position of the vertex
+        gl_Position = u_projection * u_view * worldPosition;
+
+        // Pass the normal, transformed to world space
+        v_normal = mat3(u_world) * a_normal;
+
+        // Calculate shadow coordinates using global world position
+        v_shadowCoord = u_lightWorldViewProjection * worldPosition;
     }
     `;
     const fs = `
@@ -50,7 +58,7 @@ async function main() {
             return 1.0;
         }
 
-        float currentDepth = projCoords.z - 0.001;
+        float currentDepth = projCoords.z - 0.0005;
 
         float shadow = 0.0;
         vec2 texelSize = 1.0 / vec2(textureSize(u_shadowMap, 0)); 
@@ -113,7 +121,7 @@ async function main() {
     const depthTextureSize = 4096;
     const depthTexture = gl.createTexture();
     gl.bindTexture(gl.TEXTURE_2D, depthTexture);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.DEPTH_COMPONENT16, depthTextureSize, depthTextureSize, 0, gl.DEPTH_COMPONENT, gl.UNSIGNED_SHORT, null);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.DEPTH_COMPONENT24, depthTextureSize, depthTextureSize, 0, gl.DEPTH_COMPONENT, gl.UNSIGNED_INT, null);
 
     // Set texture parameters
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
@@ -201,7 +209,7 @@ async function main() {
         }
     }
 
-    function drawShadowScene(lightViewProjection, shadowProgramInfo) {
+    function drawShadowScene(time, lightViewProjection, shadowProgramInfo) {
         gl.bindFramebuffer(gl.FRAMEBUFFER, shadowFramebuffer);
         gl.viewport(0, 0, depthTextureSize, depthTextureSize);
         gl.clear(gl.DEPTH_BUFFER_BIT);
@@ -229,15 +237,12 @@ async function main() {
                 objOffset[1] = 0; // don't move on the y plane
 
                 // Compute the world matrix once since all parts are at the same space.
-                u_world = m4.yRotation(0);
-                u_world = m4.translate(u_world, ...objOffset);
-                u_world = m4.translate(u_world, ...objPosition); // Apply the random position
                 individual_rotation = m4.yRotation(objRotation);
 
+                u_world = m4.yRotation(time * 0.05); // or 0 for no rotation
+                u_world = m4.translate(u_world, ...objOffset);
+                u_world = m4.translate(u_world, ...objPosition);
                 u_world = m4.multiply(u_world, individual_rotation);
-
-                u_worldInverse = m4.inverse(u_world);
-                u_worldInverseTranspose = m4.transpose(u_worldInverse);
 
                 for (const { bufferInfo, vao, material } of parts) {
                     // Set the attributes for this part, materials aren't used since it's not needed for the shadow map
@@ -255,21 +260,24 @@ async function main() {
     }
 
     async function loadObjects() {
+        const cubeColor = [1.0, 1.0, 1.0, 1.0]; // white
         const objColors = [
             [ // Tree colors
                 [0.0, 1.0, 0.0, 1.0], // Green
                 [0.0, 1.0, 0.0, 1.0], // Green
                 [0.0, 1.0, 0.0, 1.0], // Green
                 [0.0, 1.0, 0.0, 1.0], // Green
-                [0.6, 0.3, 0.0, 1.0] // Brown
+                [0.6, 0.3, 0.0, 1.0]  // Brown
             ],
             [ // Dead tree colors
-                [0.6, 0.3, 0.0, 1.0] // Brown
+                [0.6, 0.3, 0.0, 1.0]  // Brown
             ],
             [ // Stump colors
-                [0.6, 0.3, 0.0, 1.0] // Brown
+                [0.6, 0.3, 0.0, 1.0]  // Brown
             ]
         ];
+        
+        const cubePath = '/cube.obj';
         const files = [
             [
                 '/Objects/Low_Poly_Forest_tree01.obj',
@@ -292,19 +300,23 @@ async function main() {
             ], // tree stump
         ];
     
-        var objects = [];
+        const objects = [];
     
         for (let i = 0; i < files.length; i++) {
             const group = [];
             for (let j = 0; j < files[i].length; j++) {
-                const randomObjPath = files[i][j];
-                const objinfo = await loadObjBufferVAO(randomObjPath, objColors[i]);
+                const randomObjPath = useCube ? cubePath : files[i][j];
+                const objColor = useCube ? [cubeColor] : objColors[i];
+    
+                const objinfo = await loadObjBufferVAO(randomObjPath, objColor);
                 group.push(objinfo);
             }
             objects.push(group);
         }
-        return objects
+    
+        return objects;
     }
+    
 
     function render(time = 1) {
         time *= 0.001;
@@ -329,28 +341,28 @@ async function main() {
         const view = m4.inverse(camera);
 
         // light position and target for shadow map and lighting direction
-        const lightPosition = [15000, 30000, 15000];
+        const lightPosition = [10000, 10000, 10000];
         const lightTarget = [0, 0, 0];
         const lightViewMatrix = m4.lookAt(lightPosition, lightTarget, [0, 1, 0]);
 
         // calculate light direction for shading
         const reverseLightDirection = m4.normalize(m4.subtractVectors(lightTarget, lightPosition));
 
-        const left = -12000;
-        const right = 12000;
-        const bottom = -12000;
-        const top = 12000;
-        const near = 500;  
+        const left = -10000;
+        const right = 10000;
+        const bottom = -10000;
+        const top = 10000;
+        const near = 10;  
         const far = 100000;
 
         const lightViewProjection = m4.multiply(
             m4.orthographic(left, right, bottom, top, near, far),
             m4.inverse(lightViewMatrix)
         );
-        
-        drawShadowScene(lightViewProjection, shadowProgramInfo); // Render shadow map
-        drawCameraScene(time, projection, view, meshProgramInfo, lightViewProjection, reverseLightDirection); // Render the scene
 
+        drawShadowScene(time, lightViewProjection, shadowProgramInfo); // Render shadow map
+        drawCameraScene(time, projection, view, meshProgramInfo, lightViewProjection, reverseLightDirection); // Render the scene
+        //drawShadowMap();
         requestAnimationFrame(render);
     }
 
@@ -478,7 +490,7 @@ async function main() {
     setParameters(sliderValues);
     
     // Camera parameters
-    const zNear = 1; 
+    const zNear = 1000; 
     const zFar = 1000000;
     
     render()
