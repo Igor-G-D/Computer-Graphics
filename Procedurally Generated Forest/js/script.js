@@ -1,4 +1,5 @@
 async function main() {
+    const rng = new RNG(2)
     const canvas = document.querySelector("#canvas");
     const gl = canvas.getContext("webgl2");
     if (!gl) {
@@ -43,21 +44,29 @@ async function main() {
 
     float getShadow(vec4 shadowCoord) {
         vec3 projCoords = shadowCoord.xyz / shadowCoord.w;
-        projCoords = projCoords * 0.5 + 0.5;
-        float closestDepth = texture(u_shadowMap, projCoords.xy).r;
-        float currentDepth = projCoords.z - 0.005;
+        projCoords = projCoords * 0.5 + 0.5;  // Transform to [0, 1] range
+
+        if (projCoords.x < 0.0 || projCoords.x > 1.0 || projCoords.y < 0.0 || projCoords.y > 1.0) {
+            return 1.0;
+        }
+
+        float currentDepth = projCoords.z - 0.001;
+
         float shadow = 0.0;
-        vec2 texelSize = 1.0 / vec2(textureSize(u_shadowMap, 0));
-        
-        for (int x = -1; x <= 1; x++) {
-            for (int y = -1; y <= 1; y++) {
-                float pcfDepth = texture(u_shadowMap, projCoords.xy + vec2(x, y) * texelSize).r; 
+        vec2 texelSize = 1.0 / vec2(textureSize(u_shadowMap, 0)); 
+
+        for (int x = -2; x <= 2; x++) {
+            for (int y = -2; y <= 2; y++) {
+                float pcfDepth = texture(u_shadowMap, projCoords.xy + vec2(x, y) * texelSize).r;
                 shadow += currentDepth > pcfDepth ? 0.5 : 1.0;
             }
         }
-        shadow /= 9.0;
+        shadow /= 25.0;
+
         return shadow;
     }
+
+
 
     void main () {
         vec3 normal = normalize(v_normal);
@@ -66,7 +75,7 @@ async function main() {
         // Diffuse lighting with a softening factor
         float diffuse = max(dot(normal, lightDir), 0.0) * 0.3 + 0.5;
 
-        // Combine ambient and diffuse lighting
+        // Combine=ing ambient and diffuse lighting
         vec3 color = u_diffuse.rgb * (u_ambientLight + diffuse);
 
         // Calculate shadow
@@ -105,6 +114,8 @@ async function main() {
     const depthTexture = gl.createTexture();
     gl.bindTexture(gl.TEXTURE_2D, depthTexture);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.DEPTH_COMPONENT16, depthTextureSize, depthTextureSize, 0, gl.DEPTH_COMPONENT, gl.UNSIGNED_SHORT, null);
+
+    // Set texture parameters
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
 
@@ -113,15 +124,16 @@ async function main() {
     gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.TEXTURE_2D, depthTexture, 0);
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
 
+
     const objects = await loadObjects();
 
-    function drawCameraScene(time, projection, view, programInfo, lightWorldViewProjection) {
+    function drawCameraScene(time, projection, view, programInfo, lightWorldViewProjection, reverseLightDirection) {
         gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
         gl.useProgram(programInfo.program);
         twgl.setUniforms(programInfo, {
             u_view: view,
             u_projection: projection,
-            u_reverseLightDirection: [0.5, 0.7, 1],
+            u_reverseLightDirection: reverseLightDirection,
             u_ambientLight: [0.1, 0.1, 0.1],
             u_shadowMap: depthTexture, // Bind shadow map texture
             u_lightWorldViewProjection: lightWorldViewProjection,
@@ -189,25 +201,13 @@ async function main() {
         }
     }
 
-    function drawShadowScene(time, lightViewProjection, shadowProgramInfo) {
+    function drawShadowScene(lightViewProjection, shadowProgramInfo) {
         gl.bindFramebuffer(gl.FRAMEBUFFER, shadowFramebuffer);
         gl.viewport(0, 0, depthTextureSize, depthTextureSize);
         gl.clear(gl.DEPTH_BUFFER_BIT);
         
         // Render shadow scene
         gl.useProgram(shadowProgramInfo.program);
-
-        //drawing plane
-        gl.bindVertexArray(planeVao);
-
-        let u_world = m4.yRotation(time * 0.05);
-
-        twgl.setUniforms(shadowProgramInfo, {
-            u_world,
-            u_lightViewProjection: lightViewProjection
-        });
-
-        twgl.drawBufferInfo(gl, planeBufferInfo);
     
 
         // Render each instance at its position
@@ -221,7 +221,7 @@ async function main() {
                 const extents = getGeometriesExtents(obj.geometries);
                 const range = m4.subtractVectors(extents.max, extents.min);
 
-                // Amount to move the object so its center is at the origin
+                // amount to move the object so its center is at the origin
                 var objOffset = m4.scaleVector(
                     m4.addVectors(extents.min, m4.scaleVector(range, 1)),
                     -1
@@ -240,9 +240,8 @@ async function main() {
                 u_worldInverseTranspose = m4.transpose(u_worldInverse);
 
                 for (const { bufferInfo, vao, material } of parts) {
-                    // Set the attributes for this part.
+                    // Set the attributes for this part, materials aren't used since it's not needed for the shadow map
                     gl.bindVertexArray(vao);
-                    // Calls gl.uniform
                     twgl.setUniforms(shadowProgramInfo, {
                         u_world,
                         u_lightViewProjection: lightViewProjection
@@ -300,11 +299,10 @@ async function main() {
             for (let j = 0; j < files[i].length; j++) {
                 const randomObjPath = files[i][j];
                 const objinfo = await loadObjBufferVAO(randomObjPath, objColors[i]);
-                group.push(objinfo); // Add parts to the group array
+                group.push(objinfo);
             }
-            objects.push(group); // Add the group to the objects array
+            objects.push(group);
         }
-
         return objects
     }
 
@@ -323,24 +321,35 @@ async function main() {
         const projection = m4.perspective(fieldOfViewRadians, aspect, zNear, zFar);
 
         const up = [0, 1, 0];
-        // Compute the camera's matrix using look at.
-        const cameraRadius = 10000; // Distance from the center
-        const cameraAngle = degToRad(360); // Angle in radians
-        const cameraX = cameraRadius * Math.sin(cameraAngle);
-        const cameraZ = cameraRadius * Math.cos(cameraAngle);
-        const cameraPosition = [cameraX, 3000, cameraZ]; // Position the camera above the scene
-
-        const cameraTarget = [0, 0, 0]; // Look at the center of the scene
-
+        
+        // Computing camera matrix
+        const cameraPosition = [10000, 3000, 10000]; // camera position
+        const cameraTarget = [0, 0, 0]; // looking at center
         const camera = m4.lookAt(cameraPosition, cameraTarget, up);
         const view = m4.inverse(camera);
 
+        // light position and target for shadow map and lighting direction
         const lightPosition = [15000, 30000, 15000];
         const lightTarget = [0, 0, 0];
         const lightViewMatrix = m4.lookAt(lightPosition, lightTarget, [0, 1, 0]);
-        const lightViewProjection = m4.multiply(m4.orthographic(-10000, 10000, -10000, 10000, 1, 100000), m4.inverse(lightViewMatrix));
-        drawShadowScene(time, lightViewProjection, shadowProgramInfo); // Render shadow map
-        drawCameraScene(time, projection, view, meshProgramInfo, lightViewProjection); // Render the scene
+
+        // calculate light direction for shading
+        const reverseLightDirection = m4.normalize(m4.subtractVectors(lightTarget, lightPosition));
+
+        const left = -12000;
+        const right = 12000;
+        const bottom = -12000;
+        const top = 12000;
+        const near = 500;  
+        const far = 100000;
+
+        const lightViewProjection = m4.multiply(
+            m4.orthographic(left, right, bottom, top, near, far),
+            m4.inverse(lightViewMatrix)
+        );
+        
+        drawShadowScene(lightViewProjection, shadowProgramInfo); // Render shadow map
+        drawCameraScene(time, projection, view, meshProgramInfo, lightViewProjection, reverseLightDirection); // Render the scene
 
         requestAnimationFrame(render);
     }
@@ -375,13 +384,13 @@ async function main() {
             grid.push([]);
             for (var j = -maxDistance; j <= maxDistance; j += distance) {
                 objTypeIndex = chooseObject();
-                randomx = Math.random() * (distance / 1.5);
-                randomz = Math.random() * (distance / 1.5);
+                randomx = rng.nextFloat() * (distance / 1.5);
+                randomz = rng.nextFloat() * (distance / 1.5);
                 grid[tempCounter].push({
                     position: [i + randomx, 0, j + randomz],
-                    rotation: Math.random() * Math.PI * 2,
+                    rotation: rng.nextFloat() * Math.PI * 2,
                     objTypeIndex,
-                    objIndex: [Math.floor(Math.random() * objects[objTypeIndex].length)]
+                    objIndex: [Math.floor(rng.nextFloat() * objects[objTypeIndex].length)]
                 });
             }
             ++tempCounter;
@@ -407,9 +416,9 @@ async function main() {
             deadTreeSlider: deadTreeValue
         };
     }
-    // Function to choose an object based on probabilities
+    // Choose an object based on probabilities
     function chooseObject() {
-        const rand = Math.random();
+        const rand = rng.nextFloat();
         let sum = 0;
         for (let i = 0; i < probabilities.length; i++) {
             sum += probabilities[i];
@@ -440,7 +449,7 @@ async function main() {
 
     function setParameters(sliderValues) {
         var parameters = [sliderValues.treeSlider, sliderValues.deadTreeSlider, sliderValues.stumpSlider];
-        probabilities = normalize(parameters); // Normalizes all values to add up to 1
+        probabilities = normalize(parameters); // normalizes all values to add up to 1
 
         const { grid: new_grid, planeSize: new_planeSize } = calculateGrid(
             baseDistance = 500,
@@ -453,7 +462,6 @@ async function main() {
         planeVao = twgl.createVAOFromBufferInfo(gl, meshProgramInfo, planeBufferInfo);
     }
 
-    // Slider changes
     document.getElementById('slider-container').addEventListener('input', function(event) {
         var sliderValues;
         if (event.target.type === 'range') {
@@ -463,7 +471,7 @@ async function main() {
         setParameters(sliderValues);
     });
 
-    // Probabilities in order: Tree, dead tree, stump
+    // probabilities in order: Tree, dead tree, stump
     var probabilities, planeBufferInfo, planeVao, grid;
 
     sliderValues = getSliderValues();
