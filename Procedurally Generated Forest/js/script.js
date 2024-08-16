@@ -1,6 +1,5 @@
 async function main() {
     const rng = new RNG(2)
-    const useCube = false
     const canvas = document.querySelector("#canvas");
     const gl = canvas.getContext("webgl2");
     if (!gl) {
@@ -58,7 +57,7 @@ async function main() {
             return 1.0;
         }
 
-        float currentDepth = projCoords.z - 0.0005;
+        float currentDepth = projCoords.z - 0.0006;
 
         float shadow = 0.0;
         vec2 texelSize = 1.0 / vec2(textureSize(u_shadowMap, 0)); 
@@ -260,7 +259,6 @@ async function main() {
     }
 
     async function loadObjects() {
-        const cubeColor = [1.0, 1.0, 1.0, 1.0]; // white
         const objColors = [
             [ // Tree colors
                 [0.0, 1.0, 0.0, 1.0], // Green
@@ -277,26 +275,25 @@ async function main() {
             ]
         ];
         
-        const cubePath = '/cube.obj';
         const files = [
             [
-                '/Objects/Low_Poly_Forest_tree01.obj',
-                '/Objects/Low_Poly_Forest_tree02.obj',
-                '/Objects/Low_Poly_Forest_treeBlob01.obj',
-                '/Objects/Low_Poly_Forest_treeBlob02.obj'
+                '/Computer-Graphics/Objects/Low_Poly_Forest_tree01.obj',
+                '/Computer-Graphics/Objects/Low_Poly_Forest_tree02.obj',
+                '/Computer-Graphics/Objects/Low_Poly_Forest_treeBlob01.obj',
+                '/Computer-Graphics/Objects/Low_Poly_Forest_treeBlob02.obj'
             ], // tree
             [
-                '/Objects/Low_Poly_Forest_tree04.obj',
-                '/Objects/Low_Poly_Forest_tree05.obj',
-                '/Objects/Low_Poly_Forest_tree06.obj',
-                '/Objects/Low_Poly_Forest_tree07.obj',
-                '/Objects/Low_Poly_Forest_treeRoundTop04.obj',
-                '/Objects/Low_Poly_Forest_treeRoundTop06.obj' // dead tree  
+                '/Computer-Graphics/Objects/Low_Poly_Forest_tree04.obj',
+                '/Computer-Graphics/Objects/Low_Poly_Forest_tree05.obj',
+                '/Computer-Graphics/Objects/Low_Poly_Forest_tree06.obj',
+                '/Computer-Graphics/Objects/Low_Poly_Forest_tree07.obj',
+                '/Computer-Graphics/Objects/Low_Poly_Forest_treeRoundTop04.obj',
+                '/Computer-Graphics/Objects/Low_Poly_Forest_treeRoundTop06.obj' // dead tree  
             ], 
             [
-                '/Objects/Low_Poly_Forest_treeBlob04.obj',
-                '/Objects/Low_Poly_Forest_treeTall05.obj',
-                '/Objects/Low_Poly_Forest_treeTall06.obj'
+                '/Computer-Graphics/Objects/Low_Poly_Forest_treeBlob04.obj',
+                '/Computer-Graphics/Objects/Low_Poly_Forest_treeTall05.obj',
+                '/Computer-Graphics/Objects/Low_Poly_Forest_treeTall06.obj'
             ], // tree stump
         ];
     
@@ -305,8 +302,8 @@ async function main() {
         for (let i = 0; i < files.length; i++) {
             const group = [];
             for (let j = 0; j < files[i].length; j++) {
-                const randomObjPath = useCube ? cubePath : files[i][j];
-                const objColor = useCube ? [cubeColor] : objColors[i];
+                const randomObjPath = files[i][j];
+                const objColor = objColors[i];
     
                 const objinfo = await loadObjBufferVAO(randomObjPath, objColor);
                 group.push(objinfo);
@@ -335,25 +332,30 @@ async function main() {
         const up = [0, 1, 0];
         
         // Computing camera matrix
-        const cameraPosition = [10000, 3000, 10000]; // camera position
+        const cameraPosition = [camerax, cameray, cameraz]; // camera position
         const cameraTarget = [0, 0, 0]; // looking at center
         const camera = m4.lookAt(cameraPosition, cameraTarget, up);
         const view = m4.inverse(camera);
 
         // light position and target for shadow map and lighting direction
-        const lightPosition = [10000, 10000, 10000];
+        const lightPosition = [-10000, 10000, 15000];
         const lightTarget = [0, 0, 0];
         const lightViewMatrix = m4.lookAt(lightPosition, lightTarget, [0, 1, 0]);
 
         // calculate light direction for shading
         const reverseLightDirection = m4.normalize(m4.subtractVectors(lightTarget, lightPosition));
 
-        const left = -10000;
-        const right = 10000;
-        const bottom = -10000;
-        const top = 10000;
+        // Calculate grid bounds
+        const gridSize = grid.length * (baseDistance * density);
+        const halfGridSize = (gridSize * 0.75);
+
+        // Set left, right, bottom, top based on grid size
+        const left = -halfGridSize;
+        const right = halfGridSize;
+        const bottom = -halfGridSize;
+        const top = halfGridSize;
         const near = 10;  
-        const far = 100000;
+        const far = 100000; 
 
         const lightViewProjection = m4.multiply(
             m4.orthographic(left, right, bottom, top, near, far),
@@ -362,7 +364,6 @@ async function main() {
 
         drawShadowScene(time, lightViewProjection, shadowProgramInfo); // Render shadow map
         drawCameraScene(time, projection, view, meshProgramInfo, lightViewProjection, reverseLightDirection); // Render the scene
-        //drawShadowMap();
         requestAnimationFrame(render);
     }
 
@@ -419,13 +420,19 @@ async function main() {
         const deadTreeValue = parseFloat(document.getElementById('deadTreeSlider').value);
         const stumpValue = parseFloat(document.getElementById('stumpSlider').value);
         const forestSizeValue = parseFloat(document.getElementById('forestSizeSlider').value);
+        const camera_x = parseFloat(document.getElementById('camerax').value);
+        const camera_y = parseFloat(document.getElementById('cameray').value);
+        const camera_z = parseFloat(document.getElementById('cameraz').value);
         
         return {
             forestSizeSlider: forestSizeValue,
             densitySlider: densityValue,
             treeSlider: treeValue,
             stumpSlider: stumpValue,
-            deadTreeSlider: deadTreeValue
+            deadTreeSlider: deadTreeValue,
+            camerax: camera_x,
+            cameray: camera_y,
+            cameraz: camera_z
         };
     }
     // Choose an object based on probabilities
@@ -459,14 +466,14 @@ async function main() {
         return normalized_array;
     }
 
-    function setParameters(sliderValues) {
-        var parameters = [sliderValues.treeSlider, sliderValues.deadTreeSlider, sliderValues.stumpSlider];
+    function setForestParameters(forestSliderValues) {
+        var parameters = [forestSliderValues.treeSlider, forestSliderValues.deadTreeSlider, forestSliderValues.stumpSlider];
         probabilities = normalize(parameters); // normalizes all values to add up to 1
 
         const { grid: new_grid, planeSize: new_planeSize } = calculateGrid(
             baseDistance = 500,
-            density = sliderValues.densitySlider,
-            maxDistance = sliderValues.forestSizeSlider * 2000
+            density = forestSliderValues.densitySlider,
+            maxDistance = forestSliderValues.forestSizeSlider * 2000
         );
 
         grid = new_grid;
@@ -474,23 +481,43 @@ async function main() {
         planeVao = twgl.createVAOFromBufferInfo(gl, meshProgramInfo, planeBufferInfo);
     }
 
-    document.getElementById('slider-container').addEventListener('input', function(event) {
-        var sliderValues;
+    function setCameraParameters(cameraSliderValues) {
+        camerax = cameraSliderValues.camerax
+        cameray = cameraSliderValues.cameray
+        cameraz = cameraSliderValues.cameraz
+    }
+
+    document.getElementById('forest').addEventListener('input', function(event) {
+        var forestSliderValues;
         if (event.target.type === 'range') {
-            sliderValues = getSliderValues();
+            forestSliderValues = getSliderValues();
         }
 
-        setParameters(sliderValues);
+        setForestParameters(forestSliderValues);
+    });
+
+    document.getElementById('camera').addEventListener('input', function(event) {
+        var cameraSliderValues;
+        if (event.target.type === 'range') {
+            cameraSliderValues = getSliderValues();
+        }
+
+        setCameraParameters(cameraSliderValues);
     });
 
     // probabilities in order: Tree, dead tree, stump
     var probabilities, planeBufferInfo, planeVao, grid;
 
-    sliderValues = getSliderValues();
-    setParameters(sliderValues);
-    
     // Camera parameters
-    const zNear = 1000; 
+    var camerax, cameray, cameraz
+
+    sliderValues = getSliderValues();
+
+    setForestParameters(sliderValues);
+    setCameraParameters(sliderValues)
+
+
+    const zNear = 100; 
     const zFar = 1000000;
     
     render()

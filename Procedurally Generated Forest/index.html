@@ -9,7 +9,7 @@
 <body>
     <canvas id="canvas"></canvas>
     
-    <div id="slider-container">
+    <div class="slider-container" id="forest">
         <div class="slider-wrapper">
             <label for="forestSizeSlider">Forest Size</label>
             <input type="range" id="forestSizeSlider" min="0.2" max="10" value="4.8" step="0.1">
@@ -31,6 +31,21 @@
             <input type="range" id="stumpSlider" min="0" max="1" value="0.1" step = "0.01">
         </div>
     </div>
+    <div class="slider-container" id="camera">
+        <div class="slider-wrapper">
+            <label for="cameraHeightSlider">Camera X</label>
+            <input type="range" id="camerax" min="100" max="10000" value="1000" step = "0.1">
+        </div>
+        <div class="slider-wrapper">
+            <label for="cameraHeightSlider">Camera Y</label>
+            <input type="range" id="cameray" min="100" max="5000" value="1000" step = "0.1">
+        </div>
+        <div class="slider-wrapper">
+            <label for="cameraHeightSlider">Camera Z</label>
+            <input type="range" id="cameraz" min="100" max="10000" value="1000" step = "0.1">
+        </div>
+    </div>
+
 
     <script src="js/RNG.js"></script>
     <script src="js/twgl-full.min.js"></script>
