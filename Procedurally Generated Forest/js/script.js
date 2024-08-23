@@ -163,7 +163,7 @@ async function main() {
 
         twgl.drawBufferInfo(gl, planeBufferInfo);
     
-        // Render each instance at its position
+        // Render each object (tree, dead tree, stump) at it's position
         for (const linex of grid) {
             for (const columnz of linex) {
                 const objTypeIndex = columnz.objTypeIndex;
@@ -217,7 +217,7 @@ async function main() {
         gl.useProgram(shadowProgramInfo.program);
     
 
-        // Render each instance at its position
+        // Render each object (tree, dead tree, stump) at it's position
         for (const linex of grid) {
             for (const columnz of linex) {
                 const objTypeIndex = columnz.objTypeIndex;
@@ -238,7 +238,7 @@ async function main() {
                 // Compute the world matrix once since all parts are at the same space.
                 individual_rotation = m4.yRotation(objRotation);
 
-                u_world = m4.yRotation(time * 0.05); // or 0 for no rotation
+                u_world = m4.yRotation(time * 0.05);
                 u_world = m4.translate(u_world, ...objOffset);
                 u_world = m4.translate(u_world, ...objPosition);
                 u_world = m4.multiply(u_world, individual_rotation);
